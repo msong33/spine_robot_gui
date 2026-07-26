@@ -14,6 +14,7 @@
 //   7\n  -> Release all clamps (turn1 + turn2)
 //   8,<cycles>,<speed>\n -> Forward needle drive
 //   9,<cycles>,<speed>\n -> Backward needle drive
+//   10\n -> Diagnostic: hold syncPin HIGH 4s to test the wire to OpenRB
 //   S    -> Stop current task
 //
 // Serial responses to GUI:
@@ -246,6 +247,28 @@ bool triggerOpenRB(bool extend) {
 }
 
 
+// Diagnostic: hold syncPin HIGH for longer than the OpenRB's PULSE_MAX_MS
+// (3s), so a correctly wired OpenRB is forced to log "Sync line stuck HIGH".
+// This proves the sync wire end to end without moving the screw. Also
+// reports the idle level of donePin, which catches a swapped sync/done pair.
+void syncLineTest() {
+  Serial.print("donePin idle reads ");
+  Serial.println(digitalRead(donePin) == HIGH
+                 ? "HIGH - unexpected, suspect swapped or shorted wiring"
+                 : "LOW - as expected");
+
+  Serial.println("Holding syncPin HIGH 4000ms - watch the OpenRB monitor");
+  digitalWrite(syncPin, HIGH);
+  delay(4000);
+  digitalWrite(syncPin, LOW);
+
+  Serial.println("syncPin released LOW.");
+  Serial.println("  OpenRB logged 'stuck HIGH'  -> sync wire is good");
+  Serial.println("  OpenRB logged nothing       -> sync wire or pin 3 is dead");
+  Serial.println("false");
+}
+
+
 // ---- Composite drive functions ----
 
 // Forward needle drive:
@@ -390,6 +413,7 @@ void loop() {
         case 7: turn12(200);                                                break;  // Release all clamps
         case 8: forwardDrive(parsedInputValues[1], parsedInputValues[2]);   break;  // Forward drive
         case 9: backwardDrive(parsedInputValues[1], parsedInputValues[2]);  break;  // Backward drive
+        case 10: syncLineTest();                                            break;  // Sync wire diagnostic
       }
 
       pos = 0;
