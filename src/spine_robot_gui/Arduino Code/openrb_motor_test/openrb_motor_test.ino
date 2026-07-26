@@ -32,7 +32,7 @@ const int DXL_DIR_PIN = -1;  // Not used on OpenRB-150
 
 // Kept identical to openrb_slave.ino so this test reproduces real behavior
 const float TOLERANCE        = 2.0;     // Degrees within which target is reached
-const float MY_CURRENT_LIMIT = 1300.0;  // mA — stall protection
+const float MY_CURRENT_LIMIT = 800.0;   // mA magnitude — stall protection
 const float MOVE_DEGREES     = 360.0;   // Degrees per extend/contract
 
 const unsigned long MOVE_TIMEOUT_MS = 10000;  // Give up on a move after this
@@ -84,7 +84,8 @@ void pingMotor() {
   } else {
     DEBUG_SERIAL.println("  NO RESPONSE.");
     DEBUG_SERIAL.println("  Check, in this order:");
-    DEBUG_SERIAL.println("   1. 12V supply actually powering the servo bus");
+    DEBUG_SERIAL.println("   1. Bus supply - the XL330 is a 5V motor (3.7-6.0V).");
+    DEBUG_SERIAL.println("      Do NOT feed it 12V; that will destroy it.");
     DEBUG_SERIAL.println("   2. Dynamixel cable seated at both ends");
     DEBUG_SERIAL.println("   3. Motor ID (try 'n' to scan)");
     DEBUG_SERIAL.println("   4. Baud rate - this sketch uses 57600");
@@ -165,11 +166,13 @@ void moveRelative(float degrees) {
   while (true) {
     float pos     = dxl.getPresentPosition(dxlId, UNIT_DEGREE);
     float current = dxl.getPresentCurrent(dxlId, UNIT_MILLI_AMPERE);
-    if (current > peakCurrent) peakCurrent = current;
+    // Present current is SIGNED (negative while contracting), so track and
+    // compare magnitude — otherwise a contract move reports peak 0 mA.
+    if (abs(current) > peakCurrent) peakCurrent = abs(current);
 
     if (abs(pos - targetPos) <= TOLERANCE) { outcome = "reached target"; break; }
 
-    if (current > MY_CURRENT_LIMIT) {
+    if (abs(current) > MY_CURRENT_LIMIT) {
       outcome = "STALLED (current limit)";
       break;
     }

@@ -30,8 +30,15 @@ const int SYNC_PIN    = 3;   // Input: signal from Arduino Mega
 const int DONE_PIN    = 5;   // Output: pulse HIGH when move complete
 
 const float TOLERANCE        = 2.0;     // Degrees within which target is reached
-const float MY_CURRENT_LIMIT = 1300.0;  // mA — stall protection
 const float MOVE_DEGREES     = 360.0;   // Degrees to move per command
+
+// Stall protection, sized for the XL330 on this joint. The XL330 stalls
+// around 1500mA, and a normal unobstructed 360deg move peaks near 390mA,
+// so this sits well above normal travel but well below a hard stall.
+// Raise it if free moves start tripping; lower it to catch binds sooner.
+const float MY_CURRENT_LIMIT = 800.0;   // mA, compared as magnitude
+
+const unsigned long MOVE_TIMEOUT_MS = 5000;  // A 360deg move takes ~800ms
 
 // Sync pulse classification. The Mega sends 100ms to extend and 500ms to
 // contract, so the split sits halfway between with wide margin either side.
@@ -96,6 +103,7 @@ void moveRelative(float degrees) {
 
   dxl.setGoalPosition(DXL_ID, targetPos, UNIT_DEGREE);
 
+  unsigned long start = millis();
   while (true) {
     float pos     = dxl.getPresentPosition(DXL_ID, UNIT_DEGREE);
     float current = dxl.getPresentCurrent(DXL_ID, UNIT_MILLI_AMPERE);
@@ -104,8 +112,20 @@ void moveRelative(float degrees) {
       DEBUG_SERIAL.println("Reached target");
       break;
     }
-    if (current > MY_CURRENT_LIMIT) {
-      DEBUG_SERIAL.println("Current limit exceeded — stopping");
+    // Present current is SIGNED — negative while contracting — so this must
+    // compare magnitude. A bare `current > limit` never trips on contract.
+    if (abs(current) > MY_CURRENT_LIMIT) {
+      DEBUG_SERIAL.print("Current limit exceeded (");
+      DEBUG_SERIAL.print(current);
+      DEBUG_SERIAL.println("mA) — stopping");
+      break;
+    }
+    // Bounded so a move that neither arrives nor overcurrents cannot wedge
+    // the board in this loop forever, needing a power cycle to recover.
+    if (millis() - start > MOVE_TIMEOUT_MS) {
+      DEBUG_SERIAL.print("Move timed out at ");
+      DEBUG_SERIAL.print(pos);
+      DEBUG_SERIAL.println("deg — stopping");
       break;
     }
     delay(50);
