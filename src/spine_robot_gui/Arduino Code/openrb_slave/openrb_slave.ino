@@ -38,6 +38,8 @@ const float MOVE_DEGREES     = 360.0;   // Degrees to move per command
 const unsigned long PULSE_SPLIT_MS = 300;   // Below = extend, at/above = contract
 const unsigned long PULSE_MAX_MS   = 3000;  // Longer than this = stuck line, ignore
 
+const unsigned long SERIAL_WAIT_MS = 3000;  // Max wait for a USB serial monitor
+
 const uint8_t DXL_ID               = 1;
 const float   DXL_PROTOCOL_VERSION = 2.0;
 
@@ -48,12 +50,18 @@ using namespace ControlTableItem;
 // ---- Setup ----
 
 void setup() {
-  pinMode(SYNC_PIN, INPUT);
+  // Pulldown so the idle level is a defined LOW even if the sync wire is
+  // loose — a floating input would drift and fire phantom moves.
+  pinMode(SYNC_PIN, INPUT_PULLDOWN);
   pinMode(DONE_PIN, OUTPUT);
   digitalWrite(DONE_PIN, LOW);
 
   DEBUG_SERIAL.begin(115200);
-  while (!DEBUG_SERIAL);
+  // Wait briefly for a USB serial monitor, but NEVER block on it. Running
+  // untethered is the normal case, and blocking here means setup() never
+  // finishes, loop() never runs, and every Mega screw command times out.
+  unsigned long serialWait = millis();
+  while (!DEBUG_SERIAL && millis() - serialWait < SERIAL_WAIT_MS);
 
   dxl.begin(57600);
   dxl.setPortProtocolVersion(DXL_PROTOCOL_VERSION);
@@ -126,6 +134,13 @@ void moveRelative(float degrees) {
 
 void loop() {
   if (digitalRead(SYNC_PIN) == LOW) {
+    // Heartbeat so a silent board is distinguishable from a stuck one:
+    // if these stop, loop() is blocked; if they never start, setup() is.
+    static unsigned long lastBeat = 0;
+    if (millis() - lastBeat > 5000) {
+      lastBeat = millis();
+      DEBUG_SERIAL.println("idle (sync LOW)");
+    }
     delay(5);
     return;
   }

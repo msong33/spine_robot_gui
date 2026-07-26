@@ -224,20 +224,25 @@ bool waitForDone() {
 // The pulse is released BEFORE waiting for done: the OpenRB classifies the
 // pulse only once syncPin falls back LOW, so holding the line here would
 // deadlock both sides against each other.
+//
+// Returns true only if the OpenRB confirmed the move. Callers in a
+// composite drive MUST abort on false: continuing would clamp against a
+// screw that never moved.
 
-void triggerOpenRB(bool extend) {
+bool triggerOpenRB(bool extend) {
   Serial.println("true");
 
   digitalWrite(syncPin, HIGH);
   delay(extend ? syncPulseExtendMs : syncPulseContractMs);
   digitalWrite(syncPin, LOW);
 
-  waitForDone();
+  bool ok = waitForDone();
 
   if (!functionRunning) {
     stopRequested = false;
     Serial.println("false");
   }
+  return ok;
 }
 
 
@@ -254,7 +259,7 @@ void forwardDrive(int cycles, int speed) {
 
     // Extend screw
     checkStopRequested(); if (stopRequested) break;
-    triggerOpenRB(true);
+    if (!triggerOpenRB(true)) break;
     delay(200);
 
     // Tighten top clamp
@@ -269,7 +274,7 @@ void forwardDrive(int cycles, int speed) {
 
     // Contract screw
     checkStopRequested(); if (stopRequested) break;
-    triggerOpenRB(false);
+    if (!triggerOpenRB(false)) break;
     delay(200);
 
     // Tighten bottom clamp
@@ -305,7 +310,7 @@ void backwardDrive(int cycles, int speed) {
 
     // Contract screw
     checkStopRequested(); if (stopRequested) break;
-    triggerOpenRB(false);
+    if (!triggerOpenRB(false)) break;
     delay(200);
 
     // Tighten top clamp
@@ -320,7 +325,7 @@ void backwardDrive(int cycles, int speed) {
 
     // Extend screw
     checkStopRequested(); if (stopRequested) break;
-    triggerOpenRB(true);
+    if (!triggerOpenRB(true)) break;
     delay(200);
 
     // Tighten bottom clamp
