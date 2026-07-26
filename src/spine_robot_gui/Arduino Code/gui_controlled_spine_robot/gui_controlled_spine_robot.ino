@@ -58,6 +58,27 @@ const unsigned long syncPulseContractMs = 500;  // long  pulse -> contract
 const int dirTighten = 2;  // CCW tightens the clamps
 const int dirRelease = 1;  // CW  releases the clamps
 
+// Clamp stall detection, used when tightening. A gripped clamp cannot turn
+// further, so the encoder going quiet is how we know it is tight.
+// Tune these if tightening stops short, or grinds after it has gripped:
+//   stallMinCounts up / stallWindowMs down -> stops sooner, risks stopping early
+//   stallMinCounts down / stallWindowMs up -> grips harder, grinds longer
+const int           stallMinCounts = 2;    // Net counts that count as progress
+const unsigned long stallWindowMs  = 300;  // Tighten: no progress this long = gripped
+const unsigned long stallGraceMs   = 400;  // Ignore stalls while spinning up
+
+// These two imply a MINIMUM usable speed: the encoder must manage
+// stallMinCounts within stallWindowMs, i.e. about 7 counts/sec, or a healthy
+// tighten looks gripped and stops immediately. For reference, speed 40 runs
+// at roughly 52 counts/sec, so normal operation has ~7x margin. If you ever
+// drive the clamps far slower than that, widen stallWindowMs to match.
+
+// Fault guard for BOTH directions: the encoder making no progress at all for
+// this long means jammed, or the encoder is disconnected. Deliberately not an
+// absolute time limit — a slow-but-healthy turn can legitimately take 30s+ at
+// low speed, and an absolute cap would abort it. Only lack of motion faults.
+const unsigned long noProgressFaultMs = 2000;
+
 volatile int encoder1Pos = 0;
 volatile int encoder2Pos = 0;
 const int encoderCountsOneRev = 596;
@@ -135,18 +156,79 @@ void stopMotor(int motor) {
 // ---- Core movement: turn a motor 270 degrees ----
 // motor: 1 or 2
 // cw:    1 = clockwise, 2 = counter-clockwise
+//
+// TIGHTENING stops as soon as the encoder stops advancing. A clamp that has
+// gripped cannot turn any further, so a stalled encoder is the expected end
+// of the move rather than a fault, and 270deg is only an upper bound. This
+// is decided from the direction rather than by the caller, so every tighten
+// behaves this way — the Setup buttons and both drive cycles alike.
+//
+// RELEASING always runs the full 270deg count: a clamp left partly closed
+// would drag on the spine during the next drive step.
+//
+// Returns true if the move ended early because the motor stalled.
 
-void turn270(int motor, int speed, int cw) {
+bool turn270(int motor, int speed, int cw) {
+  const bool stopOnStall = (cw == dirTighten);
+
   int initialPos = (motor == 1) ? encoder1Pos : encoder2Pos;
+  int lastPos    = initialPos;
+
+  unsigned long start        = millis();
+  unsigned long lastProgress = start;
+  bool stalled = false;
+
   move(motor, speed, cw);
+
   while (true) {
     int currentPos = (motor == 1) ? encoder1Pos : encoder2Pos;
+
     if (abs(currentPos - initialPos) >= counts270) break;
+
     checkStopRequested();
     if (stopRequested) break;
+
+    // Net displacement since the last checkpoint, not a count of encoder
+    // edges, so jitter at a standstill cannot masquerade as progress.
+    if (abs(currentPos - lastPos) >= stallMinCounts) {
+      lastPos      = currentPos;
+      lastProgress = millis();
+    } else if (millis() - start > stallGraceMs) {
+      unsigned long idleMs = millis() - lastProgress;
+
+      // Tightening: the clamp has gripped. This is a normal stop.
+      if (stopOnStall && idleMs > stallWindowMs) {
+        stalled = true;
+        Serial.print("Clamp gripped: motor ");
+        Serial.print(motor);
+        Serial.print(" stalled at ");
+        Serial.print(abs(currentPos - initialPos));
+        Serial.print("/");
+        Serial.print(counts270);
+        Serial.println(" counts - stopping");
+        break;
+      }
+
+      // Either direction: no motion at all for far longer than a grip would
+      // take. Jammed, or the encoder is not reporting. A fault, not a grip.
+      if (idleMs > noProgressFaultMs) {
+        stalled = true;
+        Serial.print("Motor ");
+        Serial.print(motor);
+        Serial.print(" not moving at ");
+        Serial.print(abs(currentPos - initialPos));
+        Serial.print("/");
+        Serial.print(counts270);
+        Serial.println(" counts - jammed or encoder disconnected");
+        break;
+      }
+    }
+
     move(motor, speed, cw);
   }
+
   stopMotor(motor);
+  return stalled;
 }
 
 
