@@ -5,9 +5,9 @@
 // Communicates with Python GUI via Serial (115200 baud)
 //
 // Serial command protocol from GUI:
-//   1\n  -> Tighten top clamp  (motor 1 CCW 270deg)
+//   1\n  -> Tighten top clamp  (motor 1 CCW until it grips)
 //   2\n  -> Release top clamp  (motor 1 CW  270deg)
-//   3\n  -> Tighten bottom clamp (motor 2 CCW 270deg)
+//   3\n  -> Tighten bottom clamp (motor 2 CCW until it grips)
 //   4\n  -> Release bottom clamp (motor 2 CW  270deg)
 //   5\n  -> Contract screw (signal OpenRB: long HIGH pulse)
 //   6\n  -> Extend screw   (signal OpenRB: short HIGH pulse)
@@ -53,7 +53,7 @@ const int donePin = 52;  // Input from OpenRB DONE_PIN
 const unsigned long syncPulseExtendMs   = 100;  // short pulse -> extend
 const unsigned long syncPulseContractMs = 500;  // long  pulse -> contract
 
-// Clamp direction, as passed to turn270()'s cw argument (1 = CW, 2 = CCW).
+// Clamp direction, as passed to turnClamp()'s cw argument (1 = CW, 2 = CCW).
 // Flip these two values if a clamp ever tightens when it should release.
 const int dirTighten = 2;  // CCW tightens the clamps
 const int dirRelease = 1;  // CW  releases the clamps
@@ -83,6 +83,11 @@ volatile int encoder1Pos = 0;
 volatile int encoder2Pos = 0;
 const int encoderCountsOneRev = 596;
 const int counts270 = (int)(encoderCountsOneRev * 270.0 / 360.0);  // = 447 counts
+
+// Runaway cap for tightening, which otherwise has no angle target at all.
+// Only reached if the clamp never grips — a slipped coupling, a stripped
+// thread, nothing in the jaws — so it is set far beyond any real grip.
+const long tightenMaxCounts = (long)encoderCountsOneRev * 3;  // 3 revolutions
 
 char GUIInput[10];
 int parsedInputValues[3];
@@ -153,22 +158,26 @@ void stopMotor(int motor) {
 }
 
 
-// ---- Core movement: turn a motor 270 degrees ----
+// ---- Core movement: turn a clamp motor ----
 // motor: 1 or 2
 // cw:    1 = clockwise, 2 = counter-clockwise
 //
-// TIGHTENING stops as soon as the encoder stops advancing. A clamp that has
-// gripped cannot turn any further, so a stalled encoder is the expected end
-// of the move rather than a fault, and 270deg is only an upper bound. This
-// is decided from the direction rather than by the caller, so every tighten
-// behaves this way — the Setup buttons and both drive cycles alike.
+// TIGHTENING runs until the clamp grips, however far that takes — a stalled
+// encoder is the only normal way it finishes. There is no angle target,
+// because how far a clamp must turn to be tight depends on the spine, so any
+// fixed angle would either stop short of a grip or grind against one.
+// tightenMaxCounts bounds only the case where it never grips at all.
 //
-// RELEASING always runs the full 270deg count: a clamp left partly closed
-// would drag on the spine during the next drive step.
+// RELEASING runs a fixed 270deg: a clamp left partly closed would drag on the
+// spine during the next drive step.
 //
-// Returns true if the move ended early because the motor stalled.
+// The choice comes from the direction rather than from the caller, so every
+// tighten behaves this way — the Setup buttons and both tighten steps of each
+// forward and backward drive cycle.
+//
+// Returns true if the move ended because the motor stopped moving.
 
-bool turn270(int motor, int speed, int cw) {
+bool turnClamp(int motor, int speed, int cw) {
   const bool stopOnStall = (cw == dirTighten);
 
   int initialPos = (motor == 1) ? encoder1Pos : encoder2Pos;
@@ -181,9 +190,22 @@ bool turn270(int motor, int speed, int cw) {
   move(motor, speed, cw);
 
   while (true) {
-    int currentPos = (motor == 1) ? encoder1Pos : encoder2Pos;
+    int  currentPos = (motor == 1) ? encoder1Pos : encoder2Pos;
+    long travelled  = labs((long)currentPos - initialPos);
 
-    if (abs(currentPos - initialPos) >= counts270) break;
+    // Releasing stops at its angle target. Tightening has none: it keeps
+    // going until it grips, bounded only by the runaway cap below.
+    if (!stopOnStall && travelled >= counts270) break;
+
+    if (stopOnStall && travelled >= tightenMaxCounts) {
+      Serial.print("Clamp motor ");
+      Serial.print(motor);
+      Serial.print(" turned ");
+      Serial.print(travelled);
+      Serial.println(" counts without gripping - stopping, check the clamp");
+      stalled = true;
+      break;
+    }
 
     checkStopRequested();
     if (stopRequested) break;
@@ -196,16 +218,15 @@ bool turn270(int motor, int speed, int cw) {
     } else if (millis() - start > stallGraceMs) {
       unsigned long idleMs = millis() - lastProgress;
 
-      // Tightening: the clamp has gripped. This is a normal stop.
+      // Tightening: the clamp has gripped. This is the normal stop, and the
+      // count is reported bare because tightening has no target to be "of".
       if (stopOnStall && idleMs > stallWindowMs) {
         stalled = true;
         Serial.print("Clamp gripped: motor ");
         Serial.print(motor);
-        Serial.print(" stalled at ");
-        Serial.print(abs(currentPos - initialPos));
-        Serial.print("/");
-        Serial.print(counts270);
-        Serial.println(" counts - stopping");
+        Serial.print(" stalled after ");
+        Serial.print(travelled);
+        Serial.println(" counts");
         break;
       }
 
@@ -215,9 +236,9 @@ bool turn270(int motor, int speed, int cw) {
         stalled = true;
         Serial.print("Motor ");
         Serial.print(motor);
-        Serial.print(" not moving at ");
-        Serial.print(abs(currentPos - initialPos));
-        Serial.print("/");
+        Serial.print(" not moving after ");
+        Serial.print(travelled);
+        Serial.print(" of ");
         Serial.print(counts270);
         Serial.println(" counts - jammed or encoder disconnected");
         break;
@@ -237,28 +258,28 @@ bool turn270(int motor, int speed, int cw) {
 void clamp1(int speed) {
   // Tighten top clamp: motor 1 CCW 270deg
   Serial.println("true");
-  turn270(1, speed, dirTighten);
+  turnClamp(1, speed, dirTighten);
   if (!functionRunning) { stopRequested = false; Serial.println("false"); }
 }
 
 void turn1(int speed) {
   // Release top clamp: motor 1 CW 270deg
   Serial.println("true");
-  turn270(1, speed, dirRelease);
+  turnClamp(1, speed, dirRelease);
   if (!functionRunning) { stopRequested = false; Serial.println("false"); }
 }
 
 void clamp2(int speed) {
   // Tighten bottom clamp: motor 2 CCW 270deg
   Serial.println("true");
-  turn270(2, speed, dirTighten);
+  turnClamp(2, speed, dirTighten);
   if (!functionRunning) { stopRequested = false; Serial.println("false"); }
 }
 
 void turn2(int speed) {
   // Release bottom clamp: motor 2 CW 270deg
   Serial.println("true");
-  turn270(2, speed, dirRelease);
+  turnClamp(2, speed, dirRelease);
   if (!functionRunning) { stopRequested = false; Serial.println("false"); }
 }
 
@@ -369,12 +390,12 @@ void forwardDrive(int cycles, int speed) {
 
     // Tighten top clamp
     checkStopRequested(); if (stopRequested) break;
-    turn270(1, speed, dirTighten);
+    turnClamp(1, speed, dirTighten);
     delay(200);
 
     // Release bottom clamp
     checkStopRequested(); if (stopRequested) break;
-    turn270(2, speed, dirRelease);
+    turnClamp(2, speed, dirRelease);
     delay(200);
 
     // Contract screw
@@ -384,12 +405,12 @@ void forwardDrive(int cycles, int speed) {
 
     // Tighten bottom clamp
     checkStopRequested(); if (stopRequested) break;
-    turn270(2, speed, dirTighten);
+    turnClamp(2, speed, dirTighten);
     delay(200);
 
     // Release top clamp
     checkStopRequested(); if (stopRequested) break;
-    turn270(1, speed, dirRelease);
+    turnClamp(1, speed, dirRelease);
     delay(200);
 
     // Report cycle progress to GUI
@@ -420,12 +441,12 @@ void backwardDrive(int cycles, int speed) {
 
     // Tighten top clamp
     checkStopRequested(); if (stopRequested) break;
-    turn270(1, speed, dirTighten);
+    turnClamp(1, speed, dirTighten);
     delay(500);
 
     // Release bottom clamp
     checkStopRequested(); if (stopRequested) break;
-    turn270(2, speed, dirRelease);
+    turnClamp(2, speed, dirRelease);
     delay(500);
 
     // Extend screw
@@ -435,12 +456,12 @@ void backwardDrive(int cycles, int speed) {
 
     // Tighten bottom clamp
     checkStopRequested(); if (stopRequested) break;
-    turn270(2, speed, dirTighten);
+    turnClamp(2, speed, dirTighten);
     delay(500);
 
     // Release top clamp
     checkStopRequested(); if (stopRequested) break;
-    turn270(1, speed, dirRelease);
+    turnClamp(1, speed, dirRelease);
     delay(500);
 
     // Report cycle progress to GUI
