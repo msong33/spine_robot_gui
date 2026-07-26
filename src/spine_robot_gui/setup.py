@@ -13,8 +13,8 @@ setup(
     ],
     install_requires=['setuptools', 'pyserial', 'PyQt5'],
     zip_safe=True,
-    maintainer='Tunde Ayodeji',
-    maintainer_email='aayodej3@jhu.edu',
+    maintainer='Michelle',
+    maintainer_email='msong33@jhu.edu',
     description='GUI to facilitate control of needle insertion robot ' \
     'for in-development semi-autonomous vertebroplasty system',
     license='Apache License 2.0',

@@ -23,8 +23,8 @@ class SerialNode(Node):
         # Connect to Arduino Mega serial port.
         # Update port if needed: '/dev/ttyUSB0' or 'COM3' on Windows.
         try:
-            self.serial_port = serial.Serial('/dev/ttyACM0', 115200, timeout=1.0)
-            self.get_logger().info("Serial port opened: /dev/ttyACM0")
+            self.serial_port = serial.Serial('/dev/ttyACM1', 115200, timeout=1.0)
+            self.get_logger().info("Serial port opened: /dev/ttyACM1")
         except serial.SerialException as e:
             self.get_logger().error(f"Failed to open serial port: {e}")
             self.serial_port = None

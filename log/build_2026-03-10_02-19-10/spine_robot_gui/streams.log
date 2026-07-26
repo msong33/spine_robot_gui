@@ -1,0 +1,47 @@
+[0.421s] Invoking command in '/home/michelle/spine_robot_gui/src/spine_robot_gui': CONDA_PROMPT_MODIFIER=(base) PYTHONPATH=/home/michelle/spine_robot_gui/build/spine_robot_gui/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/home/michelle/spine_robot_gui/install/spine_robot_gui/lib/python3.10/site-packages:${PYTHONPATH} /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py egg_info --egg-base ../../build/spine_robot_gui build --build-base /home/michelle/spine_robot_gui/build/spine_robot_gui/build install --record /home/michelle/spine_robot_gui/build/spine_robot_gui/install.log --single-version-externally-managed install_data
+[0.554s] running egg_info
+[0.554s] creating ../../build/spine_robot_gui/spine_robot_gui.egg-info
+[0.554s] writing ../../build/spine_robot_gui/spine_robot_gui.egg-info/PKG-INFO
+[0.554s] writing dependency_links to ../../build/spine_robot_gui/spine_robot_gui.egg-info/dependency_links.txt
+[0.554s] writing entry points to ../../build/spine_robot_gui/spine_robot_gui.egg-info/entry_points.txt
+[0.554s] writing requirements to ../../build/spine_robot_gui/spine_robot_gui.egg-info/requires.txt
+[0.554s] writing top-level names to ../../build/spine_robot_gui/spine_robot_gui.egg-info/top_level.txt
+[0.554s] writing manifest file '../../build/spine_robot_gui/spine_robot_gui.egg-info/SOURCES.txt'
+[0.555s] reading manifest file '../../build/spine_robot_gui/spine_robot_gui.egg-info/SOURCES.txt'
+[0.555s] adding license file 'LICENSE'
+[0.555s] writing manifest file '../../build/spine_robot_gui/spine_robot_gui.egg-info/SOURCES.txt'
+[0.556s] running build
+[0.556s] running build_py
+[0.556s] creating /home/michelle/spine_robot_gui/build/spine_robot_gui/build
+[0.556s] creating /home/michelle/spine_robot_gui/build/spine_robot_gui/build/lib
+[0.556s] creating /home/michelle/spine_robot_gui/build/spine_robot_gui/build/lib/spine_robot_gui
+[0.556s] copying spine_robot_gui/gui_node.py -> /home/michelle/spine_robot_gui/build/spine_robot_gui/build/lib/spine_robot_gui
+[0.556s] copying spine_robot_gui/__init__.py -> /home/michelle/spine_robot_gui/build/spine_robot_gui/build/lib/spine_robot_gui
+[0.556s] copying spine_robot_gui/serial_node.py -> /home/michelle/spine_robot_gui/build/spine_robot_gui/build/lib/spine_robot_gui
+[0.556s] copying spine_robot_gui/main.py -> /home/michelle/spine_robot_gui/build/spine_robot_gui/build/lib/spine_robot_gui
+[0.556s] copying spine_robot_gui/gui.py -> /home/michelle/spine_robot_gui/build/spine_robot_gui/build/lib/spine_robot_gui
+[0.556s] running install
+[0.556s] running install_lib
+[0.556s] creating /home/michelle/spine_robot_gui/install/spine_robot_gui/lib/python3.10/site-packages/spine_robot_gui
+[0.556s] copying /home/michelle/spine_robot_gui/build/spine_robot_gui/build/lib/spine_robot_gui/gui_node.py -> /home/michelle/spine_robot_gui/install/spine_robot_gui/lib/python3.10/site-packages/spine_robot_gui
+[0.557s] copying /home/michelle/spine_robot_gui/build/spine_robot_gui/build/lib/spine_robot_gui/__init__.py -> /home/michelle/spine_robot_gui/install/spine_robot_gui/lib/python3.10/site-packages/spine_robot_gui
+[0.557s] copying /home/michelle/spine_robot_gui/build/spine_robot_gui/build/lib/spine_robot_gui/serial_node.py -> /home/michelle/spine_robot_gui/install/spine_robot_gui/lib/python3.10/site-packages/spine_robot_gui
+[0.557s] copying /home/michelle/spine_robot_gui/build/spine_robot_gui/build/lib/spine_robot_gui/main.py -> /home/michelle/spine_robot_gui/install/spine_robot_gui/lib/python3.10/site-packages/spine_robot_gui
+[0.557s] copying /home/michelle/spine_robot_gui/build/spine_robot_gui/build/lib/spine_robot_gui/gui.py -> /home/michelle/spine_robot_gui/install/spine_robot_gui/lib/python3.10/site-packages/spine_robot_gui
+[0.557s] byte-compiling /home/michelle/spine_robot_gui/install/spine_robot_gui/lib/python3.10/site-packages/spine_robot_gui/gui_node.py to gui_node.cpython-310.pyc
+[0.558s] byte-compiling /home/michelle/spine_robot_gui/install/spine_robot_gui/lib/python3.10/site-packages/spine_robot_gui/__init__.py to __init__.cpython-310.pyc
+[0.558s] byte-compiling /home/michelle/spine_robot_gui/install/spine_robot_gui/lib/python3.10/site-packages/spine_robot_gui/serial_node.py to serial_node.cpython-310.pyc
+[0.558s] byte-compiling /home/michelle/spine_robot_gui/install/spine_robot_gui/lib/python3.10/site-packages/spine_robot_gui/main.py to main.cpython-310.pyc
+[0.558s] byte-compiling /home/michelle/spine_robot_gui/install/spine_robot_gui/lib/python3.10/site-packages/spine_robot_gui/gui.py to gui.cpython-310.pyc
+[0.560s] running install_data
+[0.560s] creating /home/michelle/spine_robot_gui/install/spine_robot_gui/share/ament_index
+[0.560s] creating /home/michelle/spine_robot_gui/install/spine_robot_gui/share/ament_index/resource_index
+[0.560s] creating /home/michelle/spine_robot_gui/install/spine_robot_gui/share/ament_index/resource_index/packages
+[0.560s] copying resource/spine_robot_gui -> /home/michelle/spine_robot_gui/install/spine_robot_gui/share/ament_index/resource_index/packages
+[0.560s] copying package.xml -> /home/michelle/spine_robot_gui/install/spine_robot_gui/share/spine_robot_gui
+[0.560s] running install_egg_info
+[0.561s] Copying ../../build/spine_robot_gui/spine_robot_gui.egg-info to /home/michelle/spine_robot_gui/install/spine_robot_gui/lib/python3.10/site-packages/spine_robot_gui-1.0.0-py3.10.egg-info
+[0.562s] running install_scripts
+[0.573s] Installing main script to /home/michelle/spine_robot_gui/install/spine_robot_gui/lib/spine_robot_gui
+[0.573s] writing list of installed files to '/home/michelle/spine_robot_gui/build/spine_robot_gui/install.log'
+[0.587s] Invoked command in '/home/michelle/spine_robot_gui/src/spine_robot_gui' returned '0': CONDA_PROMPT_MODIFIER=(base) PYTHONPATH=/home/michelle/spine_robot_gui/build/spine_robot_gui/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/home/michelle/spine_robot_gui/install/spine_robot_gui/lib/python3.10/site-packages:${PYTHONPATH} /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py egg_info --egg-base ../../build/spine_robot_gui build --build-base /home/michelle/spine_robot_gui/build/spine_robot_gui/build install --record /home/michelle/spine_robot_gui/build/spine_robot_gui/install.log --single-version-externally-managed install_data

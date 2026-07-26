@@ -1,0 +1,45 @@
+running egg_info
+creating ../../build/spine_robot_gui/spine_robot_gui.egg-info
+writing ../../build/spine_robot_gui/spine_robot_gui.egg-info/PKG-INFO
+writing dependency_links to ../../build/spine_robot_gui/spine_robot_gui.egg-info/dependency_links.txt
+writing entry points to ../../build/spine_robot_gui/spine_robot_gui.egg-info/entry_points.txt
+writing requirements to ../../build/spine_robot_gui/spine_robot_gui.egg-info/requires.txt
+writing top-level names to ../../build/spine_robot_gui/spine_robot_gui.egg-info/top_level.txt
+writing manifest file '../../build/spine_robot_gui/spine_robot_gui.egg-info/SOURCES.txt'
+reading manifest file '../../build/spine_robot_gui/spine_robot_gui.egg-info/SOURCES.txt'
+adding license file 'LICENSE'
+writing manifest file '../../build/spine_robot_gui/spine_robot_gui.egg-info/SOURCES.txt'
+running build
+running build_py
+creating /home/michelle/spine_robot_gui/build/spine_robot_gui/build
+creating /home/michelle/spine_robot_gui/build/spine_robot_gui/build/lib
+creating /home/michelle/spine_robot_gui/build/spine_robot_gui/build/lib/spine_robot_gui
+copying spine_robot_gui/gui_node.py -> /home/michelle/spine_robot_gui/build/spine_robot_gui/build/lib/spine_robot_gui
+copying spine_robot_gui/__init__.py -> /home/michelle/spine_robot_gui/build/spine_robot_gui/build/lib/spine_robot_gui
+copying spine_robot_gui/serial_node.py -> /home/michelle/spine_robot_gui/build/spine_robot_gui/build/lib/spine_robot_gui
+copying spine_robot_gui/main.py -> /home/michelle/spine_robot_gui/build/spine_robot_gui/build/lib/spine_robot_gui
+copying spine_robot_gui/gui.py -> /home/michelle/spine_robot_gui/build/spine_robot_gui/build/lib/spine_robot_gui
+running install
+running install_lib
+creating /home/michelle/spine_robot_gui/install/spine_robot_gui/lib/python3.10/site-packages/spine_robot_gui
+copying /home/michelle/spine_robot_gui/build/spine_robot_gui/build/lib/spine_robot_gui/gui_node.py -> /home/michelle/spine_robot_gui/install/spine_robot_gui/lib/python3.10/site-packages/spine_robot_gui
+copying /home/michelle/spine_robot_gui/build/spine_robot_gui/build/lib/spine_robot_gui/__init__.py -> /home/michelle/spine_robot_gui/install/spine_robot_gui/lib/python3.10/site-packages/spine_robot_gui
+copying /home/michelle/spine_robot_gui/build/spine_robot_gui/build/lib/spine_robot_gui/serial_node.py -> /home/michelle/spine_robot_gui/install/spine_robot_gui/lib/python3.10/site-packages/spine_robot_gui
+copying /home/michelle/spine_robot_gui/build/spine_robot_gui/build/lib/spine_robot_gui/main.py -> /home/michelle/spine_robot_gui/install/spine_robot_gui/lib/python3.10/site-packages/spine_robot_gui
+copying /home/michelle/spine_robot_gui/build/spine_robot_gui/build/lib/spine_robot_gui/gui.py -> /home/michelle/spine_robot_gui/install/spine_robot_gui/lib/python3.10/site-packages/spine_robot_gui
+byte-compiling /home/michelle/spine_robot_gui/install/spine_robot_gui/lib/python3.10/site-packages/spine_robot_gui/gui_node.py to gui_node.cpython-310.pyc
+byte-compiling /home/michelle/spine_robot_gui/install/spine_robot_gui/lib/python3.10/site-packages/spine_robot_gui/__init__.py to __init__.cpython-310.pyc
+byte-compiling /home/michelle/spine_robot_gui/install/spine_robot_gui/lib/python3.10/site-packages/spine_robot_gui/serial_node.py to serial_node.cpython-310.pyc
+byte-compiling /home/michelle/spine_robot_gui/install/spine_robot_gui/lib/python3.10/site-packages/spine_robot_gui/main.py to main.cpython-310.pyc
+byte-compiling /home/michelle/spine_robot_gui/install/spine_robot_gui/lib/python3.10/site-packages/spine_robot_gui/gui.py to gui.cpython-310.pyc
+running install_data
+creating /home/michelle/spine_robot_gui/install/spine_robot_gui/share/ament_index
+creating /home/michelle/spine_robot_gui/install/spine_robot_gui/share/ament_index/resource_index
+creating /home/michelle/spine_robot_gui/install/spine_robot_gui/share/ament_index/resource_index/packages
+copying resource/spine_robot_gui -> /home/michelle/spine_robot_gui/install/spine_robot_gui/share/ament_index/resource_index/packages
+copying package.xml -> /home/michelle/spine_robot_gui/install/spine_robot_gui/share/spine_robot_gui
+running install_egg_info
+Copying ../../build/spine_robot_gui/spine_robot_gui.egg-info to /home/michelle/spine_robot_gui/install/spine_robot_gui/lib/python3.10/site-packages/spine_robot_gui-1.0.0-py3.10.egg-info
+running install_scripts
+Installing main script to /home/michelle/spine_robot_gui/install/spine_robot_gui/lib/spine_robot_gui
+writing list of installed files to '/home/michelle/spine_robot_gui/build/spine_robot_gui/install.log'

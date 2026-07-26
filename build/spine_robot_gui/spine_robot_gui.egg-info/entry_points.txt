@@ -1,0 +1,3 @@
+[console_scripts]
+main = spine_robot_gui.main:main
+

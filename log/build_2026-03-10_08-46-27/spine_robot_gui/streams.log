@@ -1,0 +1,22 @@
+[0.361s] Invoking command in '/home/michelle/spine_robot_gui/src/spine_robot_gui': CONDA_PROMPT_MODIFIER=(base) PYTHONPATH=/home/michelle/spine_robot_gui/build/spine_robot_gui/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/home/michelle/spine_robot_gui/install/spine_robot_gui/lib/python3.10/site-packages:${PYTHONPATH} /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py egg_info --egg-base ../../build/spine_robot_gui build --build-base /home/michelle/spine_robot_gui/build/spine_robot_gui/build install --record /home/michelle/spine_robot_gui/build/spine_robot_gui/install.log --single-version-externally-managed install_data
+[0.614s] running egg_info
+[0.615s] writing ../../build/spine_robot_gui/spine_robot_gui.egg-info/PKG-INFO
+[0.615s] writing dependency_links to ../../build/spine_robot_gui/spine_robot_gui.egg-info/dependency_links.txt
+[0.615s] writing entry points to ../../build/spine_robot_gui/spine_robot_gui.egg-info/entry_points.txt
+[0.616s] writing requirements to ../../build/spine_robot_gui/spine_robot_gui.egg-info/requires.txt
+[0.616s] writing top-level names to ../../build/spine_robot_gui/spine_robot_gui.egg-info/top_level.txt
+[0.617s] reading manifest file '../../build/spine_robot_gui/spine_robot_gui.egg-info/SOURCES.txt'
+[0.617s] adding license file 'LICENSE'
+[0.618s] writing manifest file '../../build/spine_robot_gui/spine_robot_gui.egg-info/SOURCES.txt'
+[0.618s] running build
+[0.618s] running build_py
+[0.618s] running install
+[0.619s] running install_lib
+[0.620s] running install_data
+[0.620s] running install_egg_info
+[0.621s] removing '/home/michelle/spine_robot_gui/install/spine_robot_gui/lib/python3.10/site-packages/spine_robot_gui-1.0.0-py3.10.egg-info' (and everything under it)
+[0.622s] Copying ../../build/spine_robot_gui/spine_robot_gui.egg-info to /home/michelle/spine_robot_gui/install/spine_robot_gui/lib/python3.10/site-packages/spine_robot_gui-1.0.0-py3.10.egg-info
+[0.622s] running install_scripts
+[0.641s] Installing main script to /home/michelle/spine_robot_gui/install/spine_robot_gui/lib/spine_robot_gui
+[0.641s] writing list of installed files to '/home/michelle/spine_robot_gui/build/spine_robot_gui/install.log'
+[0.659s] Invoked command in '/home/michelle/spine_robot_gui/src/spine_robot_gui' returned '0': CONDA_PROMPT_MODIFIER=(base) PYTHONPATH=/home/michelle/spine_robot_gui/build/spine_robot_gui/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/home/michelle/spine_robot_gui/install/spine_robot_gui/lib/python3.10/site-packages:${PYTHONPATH} /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py egg_info --egg-base ../../build/spine_robot_gui build --build-base /home/michelle/spine_robot_gui/build/spine_robot_gui/build install --record /home/michelle/spine_robot_gui/build/spine_robot_gui/install.log --single-version-externally-managed install_data

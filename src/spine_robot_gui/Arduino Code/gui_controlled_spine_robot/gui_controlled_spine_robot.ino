@@ -1,557 +1,359 @@
-#define STBY1 13
-#define AIN1 12
-#define AIN2 11
-#define BIN1 10
-#define BIN2 9
-#define STBY2 8
-#define CIN1 7
-#define CIN2 6
-#define DIN1 5
-#define DIN2 4
+// ============================================================
+// Arduino Mega - Main Controller
+// Controls: Clamp motors (A & B via TB6612)
+// Coordinates with OpenRB-150 via syncPin/donePin for screw
+// Communicates with Python GUI via Serial (115200 baud)
+//
+// Serial command protocol from GUI:
+//   1\n  -> Tighten top clamp  (motor 1 CW  270deg)
+//   2\n  -> Release top clamp  (motor 1 CCW 270deg)
+//   3\n  -> Tighten bottom clamp (motor 2 CW  270deg)
+//   4\n  -> Release bottom clamp (motor 2 CCW 270deg)
+//   5\n  -> Contract screw (signal OpenRB: pulse LOW)
+//   6\n  -> Extend screw   (signal OpenRB: pulse HIGH)
+//   7\n  -> Release all clamps (turn1 + turn2)
+//   8,<cycles>,<speed>\n -> Forward needle drive
+//   9,<cycles>,<speed>\n -> Backward needle drive
+//   S    -> Stop current task
+//
+// Serial responses to GUI:
+//   "true"       -> task started/running
+//   "false"      -> task finished or stopped
+//   "CYCLE:X,Y"  -> cycle progress update
+//
+// OpenRB signaling:
+//   Rather than holding syncPin HIGH or LOW, we pulse it:
+//   - Extend:   syncPin LOW -> HIGH -> wait for done -> LOW
+//   - Contract: syncPin HIGH -> LOW -> wait for done -> HIGH
+//   This guarantees the OpenRB always sees a state change,
+//   even if the same command is sent twice in a row.
+// ============================================================
 
-#define encoder1A 3
-#define encoder1B 2
+#define STBY1 13
+#define AIN1  12
+#define AIN2  11
+#define BIN1  10
+#define BIN2   9
+#define STBY2  8
+
+#define encoder1A  3
+#define encoder1B  2
 #define encoder2A 18
 #define encoder2B 19
-#define encoder3A 20
-#define encoder3B 22
-#define encoder4A 21
-#define encoder4B 23
+
+const int syncPin = 53;  // Output to OpenRB SYNC_PIN
+const int donePin = 52;  // Input from OpenRB DONE_PIN
 
 volatile int encoder1Pos = 0;
 volatile int encoder2Pos = 0;
-volatile int encoder3Pos = 0;
-volatile int encoder4Pos = 0;
-int encoderCountsOneRev = 596;
+const int encoderCountsOneRev = 596;
+const int counts270 = (int)(encoderCountsOneRev * 270.0 / 360.0);  // = 447 counts
 
-char GUIInput[10]; // Character array to hold individual bytes sent from GUI via serial
-int parsedInputValues[3]; // Three-integer array to hold values to send to robot specifying requested robot action, parsed from GUIInput
-int pos = 0; // Index counter for GUIInput parsing
+char GUIInput[10];
+int parsedInputValues[3];
+int pos = 0;
 
-bool stopRequested = false; // True stop is requested from GUI, checked using checkStopRequested function
-bool functionRunning = false; // True if one of the larger composite functions (turn12, forwardDrive, or backwardDrive) is running
+bool stopRequested   = false;
+bool functionRunning = false;
 
+
+// ---- Encoder ISRs ----
 
 void doEncoder1() {
-  if ((digitalRead(encoder1B)) == digitalRead(encoder1A)) {
-    encoder1Pos++;
-  } else {
-    encoder1Pos--;
-  }
+  encoder1Pos += (digitalRead(encoder1B) == digitalRead(encoder1A)) ? 1 : -1;
 }
 
 void doEncoder2() {
-  if ((digitalRead(encoder2B)) == digitalRead(encoder2A)) {
-    encoder2Pos++;
-  } else {
-    encoder2Pos--;
-  }
-}
-
-void doEncoder3() {
-  if ((digitalRead(encoder3B)) == digitalRead(encoder3A)) {
-    encoder3Pos++;
-  } else {
-    encoder3Pos--;
-  }
-}
-
-void doEncoder4() {
-  if ((digitalRead(encoder4B)) == digitalRead(encoder4A)) {
-    encoder4Pos++;
-  } else {
-    encoder4Pos--;
-  }
+  encoder2Pos += (digitalRead(encoder2B) == digitalRead(encoder2A)) ? 1 : -1;
 }
 
 
+// ---- Setup ----
 
-void setup(){
+void setup() {
   Serial.begin(115200);
-  
+
   pinMode(STBY1, OUTPUT);
-  pinMode(AIN1, OUTPUT);
-  pinMode(AIN2, OUTPUT);
-  pinMode(BIN1, OUTPUT);
-  pinMode(BIN2, OUTPUT);
+  pinMode(AIN1,  OUTPUT);
+  pinMode(AIN2,  OUTPUT);
+  pinMode(BIN1,  OUTPUT);
+  pinMode(BIN2,  OUTPUT);
   pinMode(STBY2, OUTPUT);
-  pinMode(CIN1, OUTPUT);
-  pinMode(CIN2, OUTPUT);
-  pinMode(DIN1, OUTPUT);
-  pinMode(DIN2, OUTPUT);
-  
+
+  pinMode(syncPin, OUTPUT);
+  pinMode(donePin, INPUT);
+
   pinMode(encoder1A, INPUT);
   pinMode(encoder1B, INPUT);
   pinMode(encoder2A, INPUT);
   pinMode(encoder2B, INPUT);
-  pinMode(encoder3A, INPUT);
-  pinMode(encoder3B, INPUT);
-  pinMode(encoder4A, INPUT);
-  pinMode(encoder4B, INPUT);
+
   attachInterrupt(digitalPinToInterrupt(encoder1A), doEncoder1, CHANGE);
   attachInterrupt(digitalPinToInterrupt(encoder2A), doEncoder2, CHANGE);
-  attachInterrupt(digitalPinToInterrupt(encoder3A), doEncoder3, CHANGE);
-  attachInterrupt(digitalPinToInterrupt(encoder4A), doEncoder4, CHANGE);
+
   digitalWrite(STBY1, HIGH);
   digitalWrite(STBY2, HIGH);
+  digitalWrite(syncPin, LOW);
 
-  Serial.println("false");
+  Serial.println("false");  // Tell GUI we are ready
 }
 
 
+// ---- Motor control ----
 
-// Move specific motor at given speed and direction
-// motor: 1 = motor A, 2 = motor B
-// speed: 0 = off, 255 = full speed
-// cw: 1 = clockwise, 2 = counter-clockwise
 void move(int motor, int speed, int cw) {
-  digitalWrite(STBY1, HIGH); // Disable standby
-
-  if (motor == 1) { // Motor A
-    if (cw == 1) { // CW
-      digitalWrite(AIN1, LOW);
-      analogWrite(AIN2, 255-speed);
-    } 
-    else { // CCW
-      analogWrite(AIN1, speed);
-      digitalWrite(AIN2, HIGH);
-    }
-  } 
-  
-  else if (motor == 2) { // Motor B
-    if(cw == 1) { // CW
-      digitalWrite(BIN1, LOW);
-      analogWrite(BIN2, 255-speed);
-    } 
-    else { //CCW
-      analogWrite(BIN1, speed);
-      digitalWrite(BIN2, HIGH);
-    }
-  } 
-  
-  else if(motor == 3){ // Motor C
-    if(cw == 1) { // CW
-      digitalWrite(CIN1, LOW);
-      analogWrite(CIN2, 255-speed);
-    } 
-    else { // CCW
-      analogWrite(CIN1, speed);
-      digitalWrite(CIN2, HIGH);
-    }
-  } 
-  
-  else if(motor == 4){ // Motor D
-    if(cw == 1) { // CW
-      digitalWrite(DIN1, LOW);
-      analogWrite(DIN2, 255-speed);
-    } 
-    else { // CCW
-      analogWrite(DIN1, speed);
-      digitalWrite(DIN2, HIGH);
-    }
-  }
-
-}
-
-
-// Releases clamp 1 (top clamp)
-void turn1(int speed, int degree, int cw) {
-  // Executes only if running as independent function, not within larger composite function
-  if (!functionRunning) {
-    Serial.println("true"); // Indicates task is running
-  }
-
-  Serial.print("Turning Motor 1 : ");
-  Serial.print(degree);
-  Serial.println(" degrees");
-  int turning = encoderCountsOneRev * (degree / 360.0);
-  Serial.print("Turning: ");
-  Serial.println(turning);
-  int  initialEncoderPos = encoder1Pos;
-  move(1, speed, cw);
-  while (abs(encoder1Pos - initialEncoderPos) < turning) {
-    move(1, speed, cw);
-    Serial.print("value diff: ");
-    Serial.println(abs(encoder1Pos - initialEncoderPos));
-    checkStopRequested();
-    if (stopRequested) {
-      break;
-    }
-  }
-  stop(1);
-
-  if (!functionRunning) {
-    delay(200);
-    stopRequested = false; // Resets stopRequested
-    Serial.println("false"); // Resets GUI back to initial state
-  }
-}
-
-// Releases clamp 2 (bottom clamp)
-void turn2(int speed, int degree, int cw) {
-  // Executes only if running as independent function, not within larger composite function
-  if (!functionRunning) {
-    Serial.println("true"); // Indicates task is running
-  }
-
-  Serial.print("Turning Motor 2 : ");
-  Serial.print(degree);
-  Serial.println(" degrees");
-  int turning = encoderCountsOneRev * (degree / 360.0);
-  Serial.print("Turning: ");
-  Serial.println(turning);
-  int  initialEncoderPos = encoder2Pos;
-  move(2, speed, cw);
-  while (abs(encoder2Pos - initialEncoderPos) < turning) {
-    move(2, speed, cw);
-    Serial.print("value diff: ");
-    Serial.println(abs(encoder2Pos - initialEncoderPos));
-    checkStopRequested();
-    if (stopRequested) {
-      break;
-    }
-  }
-  stop(2);
-  
-  if (!functionRunning) {
-    delay(200);
-    stopRequested = false; // Resets stopRequested
-    Serial.println("false"); // Resets GUI back to initial state
-  }
-}
-
-
-// Contracts or extends needle/screw (contract: cw = 1 = clockwise; extend: cw = 2 = counter-clockwise)
-void turn34(int speed, int degree, int cw) {
-  // Executes only if running as independent function, not within larger composite function
-  if (!functionRunning) {
-    Serial.println("true"); // Indicates task is running
-  }
-
-  stop(3);
-  stop(4);
-  Serial.print("Turning Motor 3 and 4 : ");
-  Serial.print(degree);
-  Serial.println(" degrees");
-  int turning = encoderCountsOneRev * (degree / 360.0);
-  int initial4EncoderPos = encoder4Pos;
-  int initial3EncoderPos = encoder3Pos;
-  move(4, speed, cw);
-  move(3, speed, cw);
-  bool motor4 = true;
-  bool motor3 = true;
-  while(motor4 || motor3) {
-    if (motor4) {
-      if (abs(encoder4Pos - initial4EncoderPos) >= turning) {
-        stop(4);
-        stop(3);
-        motor4 = false;
-        motor3 = false;
-      } else {
-        move(4, speed, cw); // Keep running motor 4
-        checkStopRequested();
-        if (stopRequested) {
-          break;
-        }
-      }
-    }
-
-    if (motor3) {
-      if (abs(encoder3Pos - initial3EncoderPos) >= turning) {
-        stop(3);
-        stop(4);
-        motor3 = false;
-        motor4 = false;
-      } else {
-        move(3, speed, cw); // Keep running motor 3
-        checkStopRequested();
-        if (stopRequested) {
-          break;
-        }
-      }
-    }
-  }
-  stop(3);
-  stop(4);
-  
-  if (!functionRunning) {
-    delay(200);
-    stopRequested = false; // Resets stopRequested
-    Serial.println("false"); // Resets GUI back to initial state
-  }
-}
-
-
-// Tightens clamp 1 (top clamp)
-void clamp1(int speed) {
-  // Executes only if running as independent function, not within larger composite function
-  if (!functionRunning) {
-    Serial.println("true"); // Indicates task is running
-  }
-
-  stop(1);
-  Serial.print("Clamp top motor : ");
-  bool motor1 = true;
-  static int lastEncoder1Pos = encoder1Pos;
-  static unsigned long lastCheckTime = millis();
-  unsigned long currentTime = millis();
-  move(1, speed, 2);
-  while (motor1) {
-    currentTime = millis();
-    if (motor1) {
-      // Check every 200 ms if encoder2Pos hasn't changed
-      if (currentTime - lastCheckTime > 50) {
-        if (abs(encoder1Pos - lastEncoder1Pos) < 2) {  // Stalled (no significant movement)
-          Serial.println("Clamp 1 done");
-          stop(1);
-          motor1 = false;
-        } else {
-          lastEncoder1Pos = encoder1Pos;
-          lastCheckTime = currentTime;
-          checkStopRequested();
-          if (stopRequested) {
-            break;
-          }
-        }
-      }
-    }
-  }
-  stop(1);
-  
-  if (!functionRunning) {
-    delay(200);
-    stopRequested = false; // Resets stopRequested
-    Serial.println("false"); // Resets GUI back to initial state
-  }
-}
-
-// Tightens clamp 2 (bottom clamp)
-void clamp2(int speed) {
-  // Executes only if running as independent function, not within larger composite function
-  if (!functionRunning) {
-    Serial.println("true"); // Indicates task is running
-  }
-
-  stop(2);
-  Serial.print("Clamp bottom motor : ");
-  bool motor2 = true;
-  static int lastEncoder2Pos = encoder2Pos;
-  static unsigned long lastCheckTime = millis();
-  unsigned long currentTime = millis();
-  move(2, speed, 2);
-  while (motor2) {
-    currentTime = millis();
-    if (motor2) {
-      // Check every 200 ms if encoder2Pos hasn't changed
-      if (currentTime - lastCheckTime > 50) {
-        if (abs(encoder2Pos - lastEncoder2Pos) < 2) {  // Stalled (no significant movement)
-          Serial.println("Clamp 2 done");
-          stop(2);
-          motor2 = false;
-        } else {
-          lastEncoder2Pos = encoder2Pos;
-          lastCheckTime = currentTime;
-          checkStopRequested();
-          if (stopRequested) {
-            break;
-          }
-        }
-      }
-    }
-  }
-  stop(2);
-  
-  if (!functionRunning) {
-    delay(200);
-    stopRequested = false; // Resets stopRequested
-    Serial.println("false"); // Resets GUI back to initial state
-  }
-}
-
-
-// Runs "Release All Clamps" task in GUI
-void turn12(int speed, int degree, int cw) {
-  functionRunning = true; // Indicates task is running
-  Serial.println("true");
-  checkStopRequested();
-  if (!stopRequested) {
-    turn1(speed, degree, cw);
-  }
-  checkStopRequested();
-  if (!stopRequested) {
-    turn2(speed, degree, cw);
-  }
-  delay(200);
-  stopRequested = false; // Resets stopRequested
-  Serial.println("false"); // Resets GUI back to initial state
-  functionRunning = false;
-}
-
-// Runs "Forward Nedle Drive" task in GUI for given number of cycles and given speed
-void forwardDrive(int cycles, int speed) {
-  functionRunning = true; // Indicates task is running
-  Serial.println("true");
-  for (int i = 0; i < cycles; i++) {
-    checkStopRequested();
-    if (stopRequested) {
-      break;
-    }
-    turn34(speed, 360, 2); // Extend
-    delay(200);
-
-    checkStopRequested();
-    if (stopRequested) {
-      break;
-    }
-    clamp1(speed); // Tighten top clamp
-    stop(1);
-    delay(200);
-
-    checkStopRequested();
-    if (stopRequested) {
-      break;
-    }
-    turn2(speed, 270, 1); // Release bottom clamp
-    stop(2);
-    delay(200);
-
-    checkStopRequested();
-    if (stopRequested) {
-      break;
-    }
-    turn34(speed, 360, 1); // Contract
-    
-    delay(200);
-    stop(3);
-    stop(4);
-
-    checkStopRequested();
-    if (stopRequested) {
-      break;
-    }
-    clamp2(speed); // Tighten bottom clamp
-    stop(1);
-    delay(200);
-
-    checkStopRequested();
-    if (stopRequested) {
-      break;
-    }
-    turn1(speed, 270, 1); // Release top clamp
-    delay(200);
-    stop(1);
-
-    Serial.println(i+1);
-  }
-  delay(200);
-  stopRequested = false; // Resets stopRequested
-  Serial.println("false"); // Resets GUI back to initial state
-  functionRunning = false;
-}
-
-// Runs "Backward Nedle Drive" task in GUI for given number of cycles and given speed
-void backwardDrive(int cycles, int speed) {
-  functionRunning = true; // Indicates task is running
-  Serial.println("true");
-  for (int i = 0; i < cycles; i++) {
-    checkStopRequested();
-    if (stopRequested) {
-      break;
-    }
-    turn34(speed, 360, 1); // Contract
-    delay(200);
-
-    checkStopRequested();
-    if (stopRequested) {
-      break;
-    }
-    clamp1(speed); // Tighten top clamp
-    stop(1);
-    delay(200);
-
-    checkStopRequested();
-    if (stopRequested) {
-      break;
-    }
-    turn2(speed, 270, 1); // Release bottom clamp
-    stop(2);
-    delay(200);
-
-    checkStopRequested();
-    if (stopRequested) {
-      break;
-    }
-    turn34(speed, 360, 2); // Extend
-    
-    delay(200);
-    stop(3);
-    stop(4);
-
-    checkStopRequested();
-    if (stopRequested) {
-      break;
-    }
-    clamp2(speed); // Tighten bottom clamp
-    stop(1);
-    delay(200);
-
-    checkStopRequested();
-    if (stopRequested) {
-      break;
-    }
-    turn1(speed, 270, 1); // Release top clamp
-    delay(200);
-    stop(1);
-
-    Serial.println(i+1);
-  }
-  delay(200);
-  stopRequested = false; // Resets stopRequested
-  Serial.println("false"); // Resets GUI back to initial state
-  functionRunning = false;
-}
-
-
-// Stops motor(s)
-void stop(int motor) {
+  digitalWrite(STBY1, HIGH);
   if (motor == 1) {
-    digitalWrite(AIN1, LOW);
-    digitalWrite(AIN2, HIGH);
+    if (cw == 1) { digitalWrite(AIN1, LOW);  analogWrite(AIN2, 255 - speed); }
+    else         { analogWrite(AIN1, speed); digitalWrite(AIN2, HIGH); }
   } else if (motor == 2) {
-    digitalWrite(BIN1, LOW);
-    digitalWrite(BIN2, HIGH);
-  } else if (motor == 3) {
-    digitalWrite(CIN1, LOW);
-    digitalWrite(CIN2, HIGH);
-  } else if (motor == 4) {
-    digitalWrite(DIN1, LOW);
-    digitalWrite(DIN2, HIGH);
+    if (cw == 1) { digitalWrite(BIN1, LOW);  analogWrite(BIN2, 255 - speed); }
+    else         { analogWrite(BIN1, speed); digitalWrite(BIN2, HIGH); }
   }
 }
 
-// Checks if stop requested from GUI
+void stopMotor(int motor) {
+  if (motor == 1) { digitalWrite(AIN1, LOW); digitalWrite(AIN2, HIGH); }
+  else if (motor == 2) { digitalWrite(BIN1, LOW); digitalWrite(BIN2, HIGH); }
+}
+
+
+// ---- Core movement: turn a motor 270 degrees ----
+// motor: 1 or 2
+// cw:    1 = clockwise, 2 = counter-clockwise
+
+void turn270(int motor, int speed, int cw) {
+  int initialPos = (motor == 1) ? encoder1Pos : encoder2Pos;
+  move(motor, speed, cw);
+  while (true) {
+    int currentPos = (motor == 1) ? encoder1Pos : encoder2Pos;
+    if (abs(currentPos - initialPos) >= counts270) break;
+    checkStopRequested();
+    if (stopRequested) break;
+    move(motor, speed, cw);
+  }
+  stopMotor(motor);
+}
+
+
+// ---- Named clamp/turn wrappers ----
+
+void clamp1(int speed) {
+  // Tighten top clamp: motor 1 CW 270deg
+  Serial.println("true");
+  turn270(1, speed, 1);
+  if (!functionRunning) { stopRequested = false; Serial.println("false"); }
+}
+
+void turn1(int speed) {
+  // Release top clamp: motor 1 CCW 270deg
+  Serial.println("true");
+  turn270(1, speed, 2);
+  if (!functionRunning) { stopRequested = false; Serial.println("false"); }
+}
+
+void clamp2(int speed) {
+  // Tighten bottom clamp: motor 2 CW 270deg
+  Serial.println("true");
+  turn270(2, speed, 1);
+  if (!functionRunning) { stopRequested = false; Serial.println("false"); }
+}
+
+void turn2(int speed) {
+  // Release bottom clamp: motor 2 CCW 270deg
+  Serial.println("true");
+  turn270(2, speed, 2);
+  if (!functionRunning) { stopRequested = false; Serial.println("false"); }
+}
+
+// Release all clamps: turn1 then turn2 sequentially
+void turn12(int speed) {
+  functionRunning = true;
+  Serial.println("true");
+  checkStopRequested();
+  if (!stopRequested) turn1(speed);
+  checkStopRequested();
+  if (!stopRequested) turn2(speed);
+  stopRequested = false;
+  Serial.println("false");
+  functionRunning = false;
+}
+
+
+// ---- OpenRB coordination ----
+
+// Wait for donePin to pulse HIGH then return LOW.
+// Returns true on success, false if stopped or timed out.
+bool waitForDone() {
+  unsigned long start = millis();
+  // Wait for donePin to go HIGH
+  while (digitalRead(donePin) == LOW) {
+    checkStopRequested();
+    if (stopRequested) return false;
+    if (millis() - start > 15000) {
+      Serial.println("OpenRB timeout");
+      return false;
+    }
+  }
+  // Wait for donePin to return LOW (end of pulse)
+  while (digitalRead(donePin) == HIGH);
+  delay(50);  // Short settle time
+  return true;
+}
+
+// Signal OpenRB using a pulse so repeated same-direction commands
+// always trigger a state change on the OpenRB side.
+//
+// Extend  (signalLevel = HIGH): pulse LOW->HIGH, OpenRB moves to 360deg
+// Contract (signalLevel = LOW):  pulse HIGH->LOW, OpenRB moves to 0deg
+//
+// After done, syncPin is reset to idle (opposite of active level)
+// so the next call always starts from the correct baseline.
+
+void triggerOpenRB(int signalLevel) {
+  Serial.println("true");
+
+  // Pulse: go to opposite first, then to desired level
+  digitalWrite(syncPin, !signalLevel);
+  delay(50);
+  digitalWrite(syncPin, signalLevel);
+
+  bool ok = waitForDone();
+
+  // Reset syncPin to idle state (opposite of what we just sent)
+  digitalWrite(syncPin, !signalLevel);
+
+  if (!functionRunning) {
+    stopRequested = false;
+    Serial.println("false");
+  }
+}
+
+
+// ---- Composite drive functions ----
+
+// Forward needle drive:
+//   extend -> tighten top -> release bottom ->
+//   contract -> tighten bottom -> release top
+void forwardDrive(int cycles, int speed) {
+  functionRunning = true;
+  Serial.println("true");
+
+  for (int i = 0; i < cycles; i++) {
+
+    // Extend screw
+    checkStopRequested(); if (stopRequested) break;
+    triggerOpenRB(HIGH);
+    delay(200);
+
+    // Tighten top clamp
+    checkStopRequested(); if (stopRequested) break;
+    turn270(1, speed, 1);
+    delay(200);
+
+    // Release bottom clamp
+    checkStopRequested(); if (stopRequested) break;
+    turn270(2, speed, 2);
+    delay(200);
+
+    // Contract screw
+    checkStopRequested(); if (stopRequested) break;
+    triggerOpenRB(LOW);
+    delay(200);
+
+    // Tighten bottom clamp
+    checkStopRequested(); if (stopRequested) break;
+    turn270(2, speed, 1);
+    delay(200);
+
+    // Release top clamp
+    checkStopRequested(); if (stopRequested) break;
+    turn270(1, speed, 2);
+    delay(200);
+
+    // Report cycle progress to GUI
+    Serial.print("CYCLE:");
+    Serial.print(i + 1);
+    Serial.print(",");
+    Serial.println(cycles);
+  }
+
+  stopRequested = false;
+  Serial.println("false");
+  functionRunning = false;
+}
+
+// Backward needle drive:
+//   contract -> tighten top -> release bottom ->
+//   extend -> tighten bottom -> release top
+void backwardDrive(int cycles, int speed) {
+  functionRunning = true;
+  Serial.println("true");
+
+  for (int i = 0; i < cycles; i++) {
+
+    // Contract screw
+    checkStopRequested(); if (stopRequested) break;
+    triggerOpenRB(LOW);
+    delay(200);
+
+    // Tighten top clamp
+    checkStopRequested(); if (stopRequested) break;
+    turn270(1, speed, 1);
+    delay(500);
+
+    // Release bottom clamp
+    checkStopRequested(); if (stopRequested) break;
+    turn270(2, speed, 2);
+    delay(500);
+
+    // Extend screw
+    checkStopRequested(); if (stopRequested) break;
+    triggerOpenRB(HIGH);
+    delay(200);
+
+    // Tighten bottom clamp
+    checkStopRequested(); if (stopRequested) break;
+    turn270(2, speed, 1);
+    delay(500);
+
+    // Release top clamp
+    checkStopRequested(); if (stopRequested) break;
+    turn270(1, speed, 2);
+    delay(500);
+
+    // Report cycle progress to GUI
+    Serial.print("CYCLE:");
+    Serial.print(i + 1);
+    Serial.print(",");
+    Serial.println(cycles);
+  }
+
+  stopRequested = false;
+  Serial.println("false");
+  functionRunning = false;
+}
+
+
+// ---- Serial helpers ----
+
 void checkStopRequested() {
   while (Serial.available()) {
-    char stopByte = Serial.read();
-    if (stopByte == 'S') {
-      stopRequested = true;
-    }
+    char b = Serial.read();
+    if (b == 'S') stopRequested = true;
   }
 }
 
 
+// ---- Main loop ----
 
 void loop() {
-  stop(1);
-  stop(2);
-  stop(3);
-  stop(4);
+  stopMotor(1);
+  stopMotor(2);
 
-  // Runs while data is available in the serial buffer
   while (Serial.available()) {
     char commandByte = Serial.read();
 
-    // Parses input values by comma once last byte of serial data has been read, places values into parsedInputValues array
     if (commandByte == '\n') {
       GUIInput[pos] = '\0';
 
@@ -562,64 +364,23 @@ void loop() {
         token = strtok(NULL, ",");
       }
 
-      for (int j = 0; j < i; j++) {
-        Serial.print("Value ");
-        Serial.print(j);
-        Serial.print(": ");
-        Serial.println(parsedInputValues[j]);
-      }
-
-      // Executes task based on first value of parsedInputValues array
-      switch (parsedInputValues[0]) { // remove delays
-        case 1:
-          // Tightens top clamp (clamp 1)
-          clamp1(150);
-          break;
-        case 2:
-          // Releases top clamp (clamp 1)
-          turn1(200, 270, 1);
-          break;
-        case 3:
-          // Tightens bottom clamp (clamp 2)
-          clamp2(150);
-          break;
-        case 4:
-          // Releases bottom clamp (clamp 2)
-          turn2(200, 270, 1);
-          break;
-        case 5:
-          // Contract screw
-          turn34(250, 720, 1);
-          break;
-        case 6:
-          // Extend screw
-          turn34(250, 711, 2);
-          break;
-        case 7:
-          // Release all clamps
-          turn12(200, 270, 1);
-          break;
-        
-        // Forward and backward drive take as arguments number of cycles and speed, represented by the second and third values of the parsedInputValues array
-        case 8:
-          forwardDrive(parsedInputValues[1], parsedInputValues[2]);
-          break;
-        case 9:
-          backwardDrive(parsedInputValues[1], parsedInputValues[2]);
-          break;
+      switch (parsedInputValues[0]) {
+        case 1: clamp1(150);                                               break;  // Tighten top clamp
+        case 2: turn1(200);                                                break;  // Release top clamp
+        case 3: clamp2(150);                                               break;  // Tighten bottom clamp
+        case 4: turn2(200);                                                break;  // Release bottom clamp
+        case 5: triggerOpenRB(LOW);                                        break;  // Contract screw
+        case 6: triggerOpenRB(HIGH);                                       break;  // Extend screw
+        case 7: turn12(200);                                               break;  // Release all clamps
+        case 8: forwardDrive(parsedInputValues[1], parsedInputValues[2]);  break;  // Forward drive
+        case 9: backwardDrive(parsedInputValues[1], parsedInputValues[2]); break;  // Backward drive
       }
 
       pos = 0;
-    }
 
-    // Adds bytes/characters from the serial buffer to GUIInput array
-    else {
-      if (pos < sizeof(GUIInput) - 1) {
-        GUIInput[pos++] = commandByte;
-      }
-      else {
-        pos = 0;
-      }
+    } else {
+      if (pos < sizeof(GUIInput) - 1) GUIInput[pos++] = commandByte;
+      else pos = 0;
     }
   }
 }
