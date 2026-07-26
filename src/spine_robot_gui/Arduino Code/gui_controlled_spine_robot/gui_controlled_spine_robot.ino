@@ -58,20 +58,26 @@ const unsigned long syncPulseContractMs = 500;  // long  pulse -> contract
 const int dirTighten = 2;  // CCW tightens the clamps
 const int dirRelease = 1;  // CW  releases the clamps
 
-// Clamp stall detection, used when tightening. A gripped clamp cannot turn
-// further, so the encoder going quiet is how we know it is tight.
-// Tune these if tightening stops short, or grinds after it has gripped:
-//   stallMinCounts up / stallWindowMs down -> stops sooner, risks stopping early
-//   stallMinCounts down / stallWindowMs up -> grips harder, grinds longer
-const int           stallMinCounts = 2;    // Net counts that count as progress
-const unsigned long stallWindowMs  = 300;  // Tighten: no progress this long = gripped
-const unsigned long stallGraceMs   = 400;  // Ignore stalls while spinning up
+// Clamp stall detection, used when tightening. Every millisecond spent past
+// the grip is the motor stalled at full PWM, which is what cooks it and the
+// TB6612, so this is tuned to notice fast.
+//
+// The threshold ADAPTS to how fast the motor is actually turning, because no
+// fixed window can serve both ends: short enough to react at speed 200 would
+// false-trigger at speed 40, and loose enough for speed 40 grinds at speed
+// 200. Instead we watch how long a healthy move takes to break new ground,
+// then call it stalled once it has been idle stallFactor times longer.
+const int           stallMinCounts   = 2;  // Counts of NEW travel = progress
+const unsigned long stallFactor      = 4;  // Idle this many x normal = stalled
+const unsigned long stallMinWindowMs = 80;   // Never react faster than this
+const unsigned long stallMaxWindowMs = 400;  // Never wait longer than this
+const unsigned long stallGraceMs     = 300;  // Ignore stalls while spinning up
 
-// These two imply a MINIMUM usable speed: the encoder must manage
-// stallMinCounts within stallWindowMs, i.e. about 7 counts/sec, or a healthy
-// tighten looks gripped and stops immediately. For reference, speed 40 runs
-// at roughly 52 counts/sec, so normal operation has ~7x margin. If you ever
-// drive the clamps far slower than that, widen stallWindowMs to match.
+// Resulting behaviour: at the clamp button speeds (150-200, roughly 200-260
+// counts/sec) new ground appears every ~8ms, so a grip is caught in the 80ms
+// floor. At slider speed 40 (~52 counts/sec) it is ~150ms. The 400ms ceiling
+// still leaves headroom down to about 6 counts/sec before a healthy slow
+// tighten would be mistaken for a grip.
 
 // Fault guard for BOTH directions: the encoder making no progress at all for
 // this long means jammed, or the encoder is disconnected. Deliberately not an
@@ -180,11 +186,12 @@ void stopMotor(int motor) {
 bool turnClamp(int motor, int speed, int cw) {
   const bool stopOnStall = (cw == dirTighten);
 
-  int initialPos = (motor == 1) ? encoder1Pos : encoder2Pos;
-  int lastPos    = initialPos;
+  int  initialPos   = (motor == 1) ? encoder1Pos : encoder2Pos;
+  long maxTravelled = 0;
 
   unsigned long start        = millis();
   unsigned long lastProgress = start;
+  unsigned long progressGap  = 0;  // Longest gap between progress while healthy
   bool stalled = false;
 
   move(motor, speed, cw);
@@ -210,23 +217,48 @@ bool turnClamp(int motor, int speed, int cw) {
     checkStopRequested();
     if (stopRequested) break;
 
-    // Net displacement since the last checkpoint, not a count of encoder
-    // edges, so jitter at a standstill cannot masquerade as progress.
-    if (abs(currentPos - lastPos) >= stallMinCounts) {
-      lastPos      = currentPos;
+    // Progress means breaking NEW ground, measured from the furthest point
+    // reached. A motor straining against a grip dithers back and forth, and
+    // comparing against the *previous* reading counts that dither as movement,
+    // which is what let a stall go unnoticed for seconds. The high-water mark
+    // ignores it, so the window below can be short and still be trustworthy.
+    if (travelled >= maxTravelled + stallMinCounts) {
+      unsigned long gap = millis() - lastProgress;
+      // Smoothed so one slow sample — static friction breaking loose at the
+      // start — does not dominate, while still tracking the real cadence.
+      progressGap  = (progressGap == 0) ? gap : (progressGap * 3 + gap) / 4;
+      maxTravelled = travelled;
       lastProgress = millis();
     } else if (millis() - start > stallGraceMs) {
       unsigned long idleMs = millis() - lastProgress;
 
+      // Idle for several times the cadence this move has actually shown means
+      // it has stopped. Clamped so it reacts fast when spinning quickly
+      // without misjudging a legitimately slow move as gripped.
+      unsigned long stallLimit;
+      if (progressGap == 0) {
+        // No cadence measured yet, so the floor would be a guess. If nothing
+        // has moved at all the clamp was already tight when we started, and
+        // waiting only stalls the motor; otherwise stay patient, because a
+        // slow move's natural gap can exceed the floor on its own.
+        stallLimit = (maxTravelled == 0) ? stallMinWindowMs * 2 : stallMaxWindowMs;
+      } else {
+        stallLimit = progressGap * stallFactor;
+        if (stallLimit < stallMinWindowMs) stallLimit = stallMinWindowMs;
+        if (stallLimit > stallMaxWindowMs) stallLimit = stallMaxWindowMs;
+      }
+
       // Tightening: the clamp has gripped. This is the normal stop, and the
       // count is reported bare because tightening has no target to be "of".
-      if (stopOnStall && idleMs > stallWindowMs) {
+      if (stopOnStall && idleMs > stallLimit) {
         stalled = true;
         Serial.print("Clamp gripped: motor ");
         Serial.print(motor);
         Serial.print(" stalled after ");
         Serial.print(travelled);
-        Serial.println(" counts");
+        Serial.print(" counts, detected in ");
+        Serial.print(idleMs);
+        Serial.println("ms");
         break;
       }
 
