@@ -5,12 +5,12 @@
 // Communicates with Python GUI via Serial (115200 baud)
 //
 // Serial command protocol from GUI:
-//   1\n  -> Tighten top clamp  (motor 1 CW  270deg)
-//   2\n  -> Release top clamp  (motor 1 CCW 270deg)
-//   3\n  -> Tighten bottom clamp (motor 2 CW  270deg)
-//   4\n  -> Release bottom clamp (motor 2 CCW 270deg)
-//   5\n  -> Contract screw (signal OpenRB: pulse LOW)
-//   6\n  -> Extend screw   (signal OpenRB: pulse HIGH)
+//   1\n  -> Tighten top clamp  (motor 1 CCW 270deg)
+//   2\n  -> Release top clamp  (motor 1 CW  270deg)
+//   3\n  -> Tighten bottom clamp (motor 2 CCW 270deg)
+//   4\n  -> Release bottom clamp (motor 2 CW  270deg)
+//   5\n  -> Contract screw (signal OpenRB: long HIGH pulse)
+//   6\n  -> Extend screw   (signal OpenRB: short HIGH pulse)
 //   7\n  -> Release all clamps (turn1 + turn2)
 //   8,<cycles>,<speed>\n -> Forward needle drive
 //   9,<cycles>,<speed>\n -> Backward needle drive
@@ -22,11 +22,14 @@
 //   "CYCLE:X,Y"  -> cycle progress update
 //
 // OpenRB signaling:
-//   Rather than holding syncPin HIGH or LOW, we pulse it:
-//   - Extend:   syncPin LOW -> HIGH -> wait for done -> LOW
-//   - Contract: syncPin HIGH -> LOW -> wait for done -> HIGH
-//   This guarantees the OpenRB always sees a state change,
-//   even if the same command is sent twice in a row.
+//   syncPin idles LOW. A HIGH pulse commands one screw move, and the
+//   width of that pulse selects the direction:
+//   - Extend:   syncPin LOW -> HIGH for 100ms -> LOW -> wait for done
+//   - Contract: syncPin LOW -> HIGH for 500ms -> LOW -> wait for done
+//   Because the line always returns to LOW, every command produces a
+//   fresh rising edge and repeating one direction works any number of
+//   times. The pulse is released before waiting for donePin, since the
+//   OpenRB only starts moving once the line falls back LOW.
 // ============================================================
 
 #define STBY1 13
@@ -43,6 +46,16 @@
 
 const int syncPin = 53;  // Output to OpenRB SYNC_PIN
 const int donePin = 52;  // Input from OpenRB DONE_PIN
+
+// Sync pulse widths. The OpenRB splits these at 300 ms, so both values
+// must stay well clear of that threshold on either side.
+const unsigned long syncPulseExtendMs   = 100;  // short pulse -> extend
+const unsigned long syncPulseContractMs = 500;  // long  pulse -> contract
+
+// Clamp direction, as passed to turn270()'s cw argument (1 = CW, 2 = CCW).
+// Flip these two values if a clamp ever tightens when it should release.
+const int dirTighten = 2;  // CCW tightens the clamps
+const int dirRelease = 1;  // CW  releases the clamps
 
 volatile int encoder1Pos = 0;
 volatile int encoder2Pos = 0;
@@ -139,30 +152,30 @@ void turn270(int motor, int speed, int cw) {
 // ---- Named clamp/turn wrappers ----
 
 void clamp1(int speed) {
-  // Tighten top clamp: motor 1 CW 270deg
+  // Tighten top clamp: motor 1 CCW 270deg
   Serial.println("true");
-  turn270(1, speed, 1);
+  turn270(1, speed, dirTighten);
   if (!functionRunning) { stopRequested = false; Serial.println("false"); }
 }
 
 void turn1(int speed) {
-  // Release top clamp: motor 1 CCW 270deg
+  // Release top clamp: motor 1 CW 270deg
   Serial.println("true");
-  turn270(1, speed, 2);
+  turn270(1, speed, dirRelease);
   if (!functionRunning) { stopRequested = false; Serial.println("false"); }
 }
 
 void clamp2(int speed) {
-  // Tighten bottom clamp: motor 2 CW 270deg
+  // Tighten bottom clamp: motor 2 CCW 270deg
   Serial.println("true");
-  turn270(2, speed, 1);
+  turn270(2, speed, dirTighten);
   if (!functionRunning) { stopRequested = false; Serial.println("false"); }
 }
 
 void turn2(int speed) {
-  // Release bottom clamp: motor 2 CCW 270deg
+  // Release bottom clamp: motor 2 CW 270deg
   Serial.println("true");
-  turn270(2, speed, 2);
+  turn270(2, speed, dirRelease);
   if (!functionRunning) { stopRequested = false; Serial.println("false"); }
 }
 
@@ -201,27 +214,25 @@ bool waitForDone() {
   return true;
 }
 
-// Signal OpenRB using a pulse so repeated same-direction commands
-// always trigger a state change on the OpenRB side.
+// Signal OpenRB with a HIGH pulse whose width selects the direction.
+// syncPin idles LOW at all times, so repeated same-direction commands
+// each produce a fresh rising edge and are never ambiguous.
 //
-// Extend  (signalLevel = HIGH): pulse LOW->HIGH, OpenRB moves to 360deg
-// Contract (signalLevel = LOW):  pulse HIGH->LOW, OpenRB moves to 0deg
+//   extend = true  -> short pulse (syncPulseExtendMs)   -> OpenRB +360deg CW
+//   extend = false -> long  pulse (syncPulseContractMs) -> OpenRB -360deg CCW
 //
-// After done, syncPin is reset to idle (opposite of active level)
-// so the next call always starts from the correct baseline.
+// The pulse is released BEFORE waiting for done: the OpenRB classifies the
+// pulse only once syncPin falls back LOW, so holding the line here would
+// deadlock both sides against each other.
 
-void triggerOpenRB(int signalLevel) {
+void triggerOpenRB(bool extend) {
   Serial.println("true");
 
-  // Pulse: go to opposite first, then to desired level
-  digitalWrite(syncPin, !signalLevel);
-  delay(50);
-  digitalWrite(syncPin, signalLevel);
+  digitalWrite(syncPin, HIGH);
+  delay(extend ? syncPulseExtendMs : syncPulseContractMs);
+  digitalWrite(syncPin, LOW);
 
-  bool ok = waitForDone();
-
-  // Reset syncPin to idle state (opposite of what we just sent)
-  digitalWrite(syncPin, !signalLevel);
+  waitForDone();
 
   if (!functionRunning) {
     stopRequested = false;
@@ -243,32 +254,32 @@ void forwardDrive(int cycles, int speed) {
 
     // Extend screw
     checkStopRequested(); if (stopRequested) break;
-    triggerOpenRB(HIGH);
+    triggerOpenRB(true);
     delay(200);
 
     // Tighten top clamp
     checkStopRequested(); if (stopRequested) break;
-    turn270(1, speed, 1);
+    turn270(1, speed, dirTighten);
     delay(200);
 
     // Release bottom clamp
     checkStopRequested(); if (stopRequested) break;
-    turn270(2, speed, 2);
+    turn270(2, speed, dirRelease);
     delay(200);
 
     // Contract screw
     checkStopRequested(); if (stopRequested) break;
-    triggerOpenRB(LOW);
+    triggerOpenRB(false);
     delay(200);
 
     // Tighten bottom clamp
     checkStopRequested(); if (stopRequested) break;
-    turn270(2, speed, 1);
+    turn270(2, speed, dirTighten);
     delay(200);
 
     // Release top clamp
     checkStopRequested(); if (stopRequested) break;
-    turn270(1, speed, 2);
+    turn270(1, speed, dirRelease);
     delay(200);
 
     // Report cycle progress to GUI
@@ -294,32 +305,32 @@ void backwardDrive(int cycles, int speed) {
 
     // Contract screw
     checkStopRequested(); if (stopRequested) break;
-    triggerOpenRB(LOW);
+    triggerOpenRB(false);
     delay(200);
 
     // Tighten top clamp
     checkStopRequested(); if (stopRequested) break;
-    turn270(1, speed, 1);
+    turn270(1, speed, dirTighten);
     delay(500);
 
     // Release bottom clamp
     checkStopRequested(); if (stopRequested) break;
-    turn270(2, speed, 2);
+    turn270(2, speed, dirRelease);
     delay(500);
 
     // Extend screw
     checkStopRequested(); if (stopRequested) break;
-    triggerOpenRB(HIGH);
+    triggerOpenRB(true);
     delay(200);
 
     // Tighten bottom clamp
     checkStopRequested(); if (stopRequested) break;
-    turn270(2, speed, 1);
+    turn270(2, speed, dirTighten);
     delay(500);
 
     // Release top clamp
     checkStopRequested(); if (stopRequested) break;
-    turn270(1, speed, 2);
+    turn270(1, speed, dirRelease);
     delay(500);
 
     // Report cycle progress to GUI
@@ -365,15 +376,15 @@ void loop() {
       }
 
       switch (parsedInputValues[0]) {
-        case 1: clamp1(150);                                               break;  // Tighten top clamp
-        case 2: turn1(200);                                                break;  // Release top clamp
-        case 3: clamp2(150);                                               break;  // Tighten bottom clamp
-        case 4: turn2(200);                                                break;  // Release bottom clamp
-        case 5: triggerOpenRB(LOW);                                        break;  // Contract screw
-        case 6: triggerOpenRB(HIGH);                                       break;  // Extend screw
-        case 7: turn12(200);                                               break;  // Release all clamps
-        case 8: forwardDrive(parsedInputValues[1], parsedInputValues[2]);  break;  // Forward drive
-        case 9: backwardDrive(parsedInputValues[1], parsedInputValues[2]); break;  // Backward drive
+        case 1: clamp1(150);                                                break;  // Tighten top clamp
+        case 2: turn1(200);                                                 break;  // Release top clamp
+        case 3: clamp2(150);                                                break;  // Tighten bottom clamp
+        case 4: turn2(200);                                                 break;  // Release bottom clamp
+        case 5: triggerOpenRB(false);                                       break;  // Contract screw
+        case 6: triggerOpenRB(true);                                        break;  // Extend screw
+        case 7: turn12(200);                                                break;  // Release all clamps
+        case 8: forwardDrive(parsedInputValues[1], parsedInputValues[2]);   break;  // Forward drive
+        case 9: backwardDrive(parsedInputValues[1], parsedInputValues[2]);  break;  // Backward drive
       }
 
       pos = 0;

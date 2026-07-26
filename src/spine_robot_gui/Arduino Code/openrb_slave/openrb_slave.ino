@@ -7,10 +7,12 @@
 //   DONE_PIN (pin 5) -> Mega pin 52 (donePin)
 //
 // Signaling protocol:
-//   Mega pulses syncPin to signal a command:
-//     HIGH pulse (LOW->HIGH->LOW)  -> Extend:   rotate 360deg CW
-//     LOW  pulse (HIGH->LOW->HIGH) -> Contract: rotate 360deg CCW
+//   SYNC_PIN idles LOW. The Mega sends a HIGH pulse to command one move,
+//   and the width of that pulse selects the direction:
+//     short pulse (~100ms) -> Extend:   rotate 360deg CW
+//     long  pulse (~500ms) -> Contract: rotate 360deg CCW
 //
+//   The move begins on the falling edge, once the width is known.
 //   Each command moves relative to current position, so the same
 //   command can be repeated any number of times in a row.
 //
@@ -30,6 +32,11 @@ const int DONE_PIN    = 5;   // Output: pulse HIGH when move complete
 const float TOLERANCE        = 2.0;     // Degrees within which target is reached
 const float MY_CURRENT_LIMIT = 1300.0;  // mA — stall protection
 const float MOVE_DEGREES     = 360.0;   // Degrees to move per command
+
+// Sync pulse classification. The Mega sends 100ms to extend and 500ms to
+// contract, so the split sits halfway between with wide margin either side.
+const unsigned long PULSE_SPLIT_MS = 300;   // Below = extend, at/above = contract
+const unsigned long PULSE_MAX_MS   = 3000;  // Longer than this = stuck line, ignore
 
 const uint8_t DXL_ID               = 1;
 const float   DXL_PROTOCOL_VERSION = 2.0;
@@ -108,30 +115,40 @@ void moveRelative(float degrees) {
 
 // ---- Main loop ----
 //
-// Pulse detection:
-//   HIGH pulse (LOW->HIGH->LOW)  -> extend  (CW  +360deg)
-//   LOW  pulse (HIGH->LOW->HIGH) -> contract (CCW -360deg)
+// SYNC_PIN idles LOW. A HIGH pulse commands one move and the width of
+// that pulse selects the direction:
+//   short pulse (< PULSE_SPLIT_MS) -> extend   (CW  +360deg)
+//   long  pulse (>= PULSE_SPLIT_MS) -> contract (CCW -360deg)
+//
+// The move starts on the falling edge, once the full width is known.
+// Measuring width instead of reading a resting level means the line is
+// never ambiguous: a pin sitting at idle can't be mistaken for a command.
 
 void loop() {
-  int syncState = digitalRead(SYNC_PIN);
-  static int lastState = LOW;
-
-  // HIGH pulse detected -> Extend CW
-  if (syncState == HIGH) {
-    DEBUG_SERIAL.println("HIGH pulse -> Extending +360deg CW");
-    // Wait for pin to return LOW (end of pulse)
-    while (digitalRead(SYNC_PIN) == HIGH);
-    moveRelative(MOVE_DEGREES);
+  if (digitalRead(SYNC_PIN) == LOW) {
+    delay(5);
+    return;
   }
 
-  // HIGH->LOW transition detected -> Contract CCW
-  else if (lastState == HIGH && syncState == LOW) {
-    DEBUG_SERIAL.println("LOW pulse -> Contracting -360deg CCW");
-    // Wait for pin to return HIGH (end of pulse)
-    while (digitalRead(SYNC_PIN) == LOW);
+  // Rising edge — time how long the line stays HIGH.
+  // Nothing is printed inside this loop to keep the measurement tight.
+  unsigned long start = millis();
+  while (digitalRead(SYNC_PIN) == HIGH) {
+    if (millis() - start > PULSE_MAX_MS) {
+      DEBUG_SERIAL.println("Sync line stuck HIGH - ignoring");
+      while (digitalRead(SYNC_PIN) == HIGH);  // Wait it out, no move
+      return;
+    }
+  }
+  unsigned long width = millis() - start;
+
+  if (width < PULSE_SPLIT_MS) {
+    DEBUG_SERIAL.print(width);
+    DEBUG_SERIAL.println("ms pulse -> Extending +360deg CW");
+    moveRelative(MOVE_DEGREES);
+  } else {
+    DEBUG_SERIAL.print(width);
+    DEBUG_SERIAL.println("ms pulse -> Contracting -360deg CCW");
     moveRelative(-MOVE_DEGREES);
   }
-
-  lastState = syncState;
-  delay(20);
 }
